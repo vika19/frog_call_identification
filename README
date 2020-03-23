@@ -1,0 +1,348 @@
+###########################################
+Audio Identification Code, leveraged for the frog call project at NCGAS.  
+This code is almost entirely the work of Seth Adams via https://www.youtube.com/watch?v=Z7YM-HAz-IY&list=PLhA3b2k8R3t2Ng1WW_7MiXeh1pfQJQi_P
+Scripted, tested, adjusted, and documented by Sheri Sanders, 2019-2020
+For more information, email help@ncgas.org
+###########################################
+
+Need for each project:
+-folder of recordings called wavfiles/
+-csv of filename,identification called instruments.csv
+
+###########################################
+Step 1: Clean Data
+###########################################
+Instructions:
+python eda.py
+
+What you are doing:
+The script reads in files from instruments.csv and removes whitespace, transforms them using Fourier Transformation to convert the wavfile to a spectrogram (amp vs time) to a periodogram (mag vs freq) into a periodgram through time (freq vs mag).  
+
+Transformation is done in three major steps.  
+	1) Data is processed with a short-term Fouier Transformation in a hanning (sliding) window (window = 25ms, step = 10ms as per standard audio analysis practice).  A Hanning window weights the strength of the signal in each window in a ~normal distribution to prevent "spectral leakage", which occurs when the same frequency is over-represented across multiple windows.  
+	2) Further transformation is done to correct for the logrithmic relationship between discrimitory significance and pitch (i.e. minute differences in high frequencies are much less observable to human hearing than minute differences in lower frequencies) - called a Mel Scale Filtering.  This also defines 26 features in the recording, a pattern for each of 26 Mel ... units? (google Mel scale - it's the number of triangles). 
+	3) Finally, data gets a Discrete Cosine Transformation, which acts as a low-pass filter, to downsample the number of features to 13 most important (lowest).  
+
+This final transformation results in Mel Cepstrum Coefficients (MCCs) that provide a sound fingerprint for each species.  These are able to be visualized if you are curious.
+
+eda.py can also:
+- print a pie chart of the distribution of classes in the input data
+- print the sample spectrograms (signals) for each class
+- print the sample Fouier Transformations for each class
+- print the sample Mel Scaling for each class
+- print the sample MCCs for each class
+
+More details on all of these steps can be found in the tutorial that I shamelessly stole this from (don't worry, we cite it!):  https://www.youtube.com/watch?v=Z7YM-HAz-IY&list=PLhA3b2k8R3t2Ng1WW_7MiXeh1pfQJQi_P
+
+###########################################
+Step 2: Build the Model
+###########################################
+Instructions: 
+python model.py
+
+What you are doing:
+The script randomly selects files from the list in instructions.csv based on distribution of the labeled test data.  Then, several random 0.1s of that file is read in and a mfcc is calculated for that file.  This is done for all files in the set, and a constant min and max mfcc value is calculated across all samples.  The purpose is to randomize the input order of the categories, as well as the specific call segment.  This data is then scaled from 0-1 using the min/max data to create the model input.
+
+Two options, CNN or RNN, are built into this script.  
+
+If model='conv' (CNN), the data is passed through a CNN that is sequential, builds four layers of neurons (16, 32, 64, 128), and then flattened from 128 to 64 to 10 (number of categories in demo data). Soft masking is enabled, so a probability value is calculated for each of the species when making predictions.
+
+If model='time' (RNN), the model is built using a Long Short-Term Memory (LSTM) RNN.  This data has 128 dense LSTM neurons, another 128 dense LSTM neurons, the a density flattening to 64, 32,16,8, and finally 10.  This model takes longer to train and needs more tuning.  
+
+RNNs are best used to model things that change through time, as the model tries to gleen information from each time segment to inform the identification, rather than looking at the fingerprint as a whole as in a CNN.
+
+NOTE: A summary of the model is printed, and allows for the evaluation of number of features at each step.  This is useful in the calculation of the memory used and to help you control against massive feature numbers when modifying the exact neuron structure with different data sets.
+
+This will output "pickles" to pickles/, which are saved models.
+
+###########################################
+Step 3: Make Predictions
+###########################################
+python predict.py
+
+This reads in the audiofiles, currently also from wavfiles/, calculates the mfccs for each 0.1s segment in the file, , and scales them to the min and max in the saved model.  It then averages the predictions across all subsamples from that wavfile.  The maxium value is taken from the full set and that category is printed along with the prediction probability, all the prediction values, and the true label from the instruments file (for testing and building purposes, turn that off for predicting novel data).
+
+NOTE: Currently, I am developing this to possibly predict species identifications through time to enable multi-species call recordings.  This will effect the outputs of the model, but not currently the functionality.  
+
+###########################################
+Previously used code for frog calls
+###########################################
+
+here's the steps for subsetting:
+1) crop down the instruments file
+2) sed 's/,/ /g' instruments.csv | awk '{print $1}' > four_files #will make a list of wavs to keep
+3) move to wavfiles folder
+4) mkdir ../keep_audio
+5) cp `cat ../four_files` ../keep_audio
+6) then cd ..
+7) mv wavfiles all_wavfiles
+8) mv keep_audio wavfiles #that will give you the subset
+9) then just change the lines that are marked in model.py -> drop the final network density pruning to 4 for both models, then drop the num_categories (also marked) to 4
+10) be sure to clear the models and pickes... then it runs.
+
+Running the model 10 times and saving the accuracy for the Table in the paper:
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' > outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+sudo python model.py
+python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs (edited) 
+
+To add more species, just remember, subset the csv (grep -v works great), then remove the audio files, then clean out any tiny files, then adjust for the categories in the three places in model.py
+
+if you don't remember, to remove the cleaned files that were smaller than 100K, we did the following:
+ls -lah #prints long form of files, including their size
+sed 's/K//g' #removes the K from the file length
+awk '{if ($5>=100) print $9}' #if the size column (5) is larger than 100, print the file name
+in totality, this looks like "cd clean; ls -lah | sed 's/K//g' | awk '{if ($5>=100) print $9}' > keep_files.list"
+then use the trick I showed you (and listed above) to "mkdir ../keep_clean; cp cat keep_files.list ../keep_clean"
+then you just have to "cd ..; mv clean clean_4sp; mv keep_clean clean"
+that will set you up for subsetting the clean files and prevent the step size error that occurs when the file didn't have much call data in it
+
+#To subset out a test set:
+in Fixed_Audio_Classification-->grep "Chorus" instruments.csv | head -n 100 > instruments_test_set.csv
+in Fixed_Audio_Classification-->grep "eeper" instruments.csv | head -n 100 >> instruments_test_set.csv
+in Fixed_Audio_Classification-->grep "reen" instruments.csv | head -n 100 >> instruments_test_set.csv
+in Fixed_Audio_Classification-->grep "oad" instruments.csv | head -n 100 >> instruments_test_set.csv
+#check:
+wc -l instruments_test_set.csv # should be 100 x # of species
+#add header
+nano instruments_test_set.csv   #add fname,label
+_________________I HAVE DONE THE ABOVE FOR YOU________________________
+#make training csv: - you will have to do this (as you have files)
+wc -l instruments.csv  #how many total, something like ~1200?
+grep -vf instruments_test_set2.csv instruments.csv | wc -l   #should be total - 100 * # of sp - 1(header)
+grep -vf instruments_test_set2.csv instruments.csv > instruments_training.csv
+#add header
+nano instruments_training.csv   #add fname,label
+#subset the files - you have to do this!
+mkdir wavfiles_test
+cp $(sed -e 1d -e 's/,/\ /g' instruments_test_set2.csv | awk '{print "wavfiles/"$1}') wavfiles_test/
+#mkdir wavfiles_training
+cp $(sed -e 1d -e 's/,/\ /g' instruments_training2.csv | awk '{print "wavfiles/"$1}') wavfiles_training/
+#clean up
+sed -i 's|wavfiles/||g' instruments_training.csv
+sed -i 's|wavfiles/||g' instruments_test_set2.csv
+#check numbers
+wc -l wavfiles_test   #should be 200
+wc -l wavfiles_training  #should be ~1000?
+#run the thing!
+#clear pickles
+#clear models
+#training:
+#mv clean somewhere and make a new "clean" dir
+#point to training instruments.csv and wavfile dir
+ln -s instruments_training.csv instruments.csv
+ln -s wavfiles_training/ wavfiles
+#run eda.py - on GUI
+time eda.py  #only has to be done for one - time or conv
+sudo time python model.py   #RUN THIS FOR BOTH time and conv!
+#testing:
+#point to test csv and wavfile dir
+unlink wavfiles
+unlink instruments
+ln -s wavfiles_test/ wavfiles
+ln -s instruments_test_set.csv instruments.csv
+mv clean clean_training
+mkdir clean
+sudo time python eda.py #again, only needed once!
+sudo time python predict.py
+mv clean clean_testing
+#TESTED TO HERE, WORKS
+
+you should not run automation script (sending shortly) unless you have:
+instruments_test_set.csv
+instruments_training.csv
+clean_test
+clean_training
+wavfiles_test
+wavfiles_training
+pickles/time.p #NEW
+pickles/conv.p #NEW
+models/time.p #NEW
+models/conv.p #NEW
+
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' > outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
+####
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_training wavfiles
+ln -s instruments_training.csv instruments.csv
+ln -s clean_training clean
+time sudo python model.py
+unlink wavfiles
+unlink instruments.csv
+unlink clean
+ln -s wavfiles_test wavfiles
+ln -s instruments_test_set.csv instruments.csv
+ln -s clean_test clean
+sudo time python predict.py
+cat predictions.csv | sed 's/,/ /g' | awk 'BEGIN{sum=0}{if ($2 == $NF) sum += 1}END{print sum/NR}' >> outputs
